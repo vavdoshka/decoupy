@@ -1,7 +1,7 @@
 import os
 import shutil
 from unittest import TestCase
-from decoupy import main
+from decoupy.main import main, module_meta
 from tempfile import gettempdir
 import mock
 
@@ -9,6 +9,7 @@ import mock
 def make_file(pathname, content):
     with open(pathname, 'w') as f:
         f.write(content)
+
 
 def norm_indent(code):
     if code == '':
@@ -18,6 +19,7 @@ def norm_indent(code):
             ws_to_strip = i
             break
     return '\n'.join([line[ws_to_strip:] for line in code.split('\n')]).strip()
+
 
 def build_package_tree(tree, current_dir=''):
     for k, v in tree.iteritems():
@@ -69,7 +71,7 @@ if __name__ == '__main__':
             }
         }
         with mock.patch('os.makedirs') as makedirs_stub,\
-            mock.patch('unittests.make_file') as make_file_stub:
+                mock.patch('unittests.make_file') as make_file_stub:
             build_package_tree(tree)
         makedirs_stub.assert_has_calls([mock.call("root"),
                                         mock.call('root/inner1'),
@@ -89,13 +91,16 @@ PACKAGE_C = 'package_c'
 MODULE_A = 'module_a.py'
 MODULE_B = 'module_b.py'
 INIT_FILE = '__init__.py'
+MAIN = '__main__'
 
 PACKAGE_A_PATHNAME = ''
 PACKAGE_B_PATHNAME = ''
 PACKAGE_C_PATHNAME = ''
 
+PACKAGE_A_MODULE_INIT_PATHNAME = ''
 PACKAGE_A_MODULE_A_PATHNAME = ''
 PACKAGE_A_MODULE_B_PATHNAME = ''
+PACKAGE_B_MODULE_INIT_PATHNAME = ''
 PACKAGE_B_MODULE_A_PATHNAME = ''
 PACKAGE_B_MODULE_B_PATHNAME = ''
 
@@ -113,9 +118,12 @@ class AcceptanceTests(TestCase):
         PACKAGE_C_PATHNAME = os.path.join(ROOT_PACKAGE, PACKAGE_C)
 
         global PACKAGE_A_MODULE_A_PATHNAME, PACKAGE_B_MODULE_A_PATHNAME,\
-            PACKAGE_B_MODULE_B_PATHNAME, PACKAGE_A_MODULE_B_PATHNAME
+            PACKAGE_B_MODULE_B_PATHNAME, PACKAGE_A_MODULE_B_PATHNAME, PACKAGE_A_MODULE_INIT_PATHNAME,\
+            PACKAGE_B_MODULE_INIT_PATHNAME
+        PACKAGE_A_MODULE_INIT_PATHNAME = os.path.join(PACKAGE_A_PATHNAME, INIT_FILE)
         PACKAGE_A_MODULE_A_PATHNAME = os.path.join(PACKAGE_A_PATHNAME, MODULE_A)
         PACKAGE_A_MODULE_B_PATHNAME = os.path.join(PACKAGE_A_PATHNAME, MODULE_B)
+        PACKAGE_B_MODULE_INIT_PATHNAME = os.path.join(PACKAGE_B_PATHNAME, INIT_FILE)
         PACKAGE_B_MODULE_A_PATHNAME = os.path.join(PACKAGE_B_PATHNAME, MODULE_A)
         PACKAGE_B_MODULE_B_PATHNAME = os.path.join(PACKAGE_B_PATHNAME, MODULE_B)
 
@@ -152,10 +160,13 @@ class AcceptanceTests(TestCase):
             }
         )
 
-        result = main.main(PACKAGE_A_PATHNAME, PACKAGE_B_PATHNAME)
+        result = main(PACKAGE_A_PATHNAME, PACKAGE_B_PATHNAME)
 
         etalon = {
-            PACKAGE_A_MODULE_A_PATHNAME: set([PACKAGE_B_MODULE_A_PATHNAME])
+            module_meta(MAIN, PACKAGE_A_MODULE_A_PATHNAME): set(
+                [module_meta('.'.join([ROOT, PACKAGE_B]), PACKAGE_B_MODULE_INIT_PATHNAME),
+                 module_meta('.'.join([ROOT, PACKAGE_B, "module_a"]), PACKAGE_B_MODULE_A_PATHNAME)]
+            ),
         }
         self.assertDictEqual(result, etalon)
 
@@ -206,11 +217,19 @@ class AcceptanceTests(TestCase):
             }
         )
 
-        result = main.main(PACKAGE_A_PATHNAME, PACKAGE_B_PATHNAME)
+        result = main(PACKAGE_A_PATHNAME, PACKAGE_B_PATHNAME)
 
         etalon = {
-            PACKAGE_A_MODULE_A_PATHNAME: set([PACKAGE_B_MODULE_A_PATHNAME]),
-                  PACKAGE_B_MODULE_B_PATHNAME: set([PACKAGE_A_MODULE_B_PATHNAME])
+            module_meta(MAIN, PACKAGE_A_MODULE_A_PATHNAME):
+                set(
+                    [module_meta('.'.join([ROOT, PACKAGE_B]), PACKAGE_B_MODULE_INIT_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_B, "module_a"]), PACKAGE_B_MODULE_A_PATHNAME)]
+                ),
+            module_meta(MAIN, PACKAGE_B_MODULE_B_PATHNAME):
+                set(
+                [module_meta('.'.join([ROOT, PACKAGE_A]), PACKAGE_A_MODULE_INIT_PATHNAME),
+                 module_meta('.'.join([ROOT, PACKAGE_A, 'module_b']), PACKAGE_A_MODULE_B_PATHNAME)]
+            )
         }
         self.assertDictEqual(result, etalon)
 
@@ -255,10 +274,149 @@ class AcceptanceTests(TestCase):
             }
         )
 
-        result = main.main(PACKAGE_A_PATHNAME, PACKAGE_B_PATHNAME)
+        result = main(PACKAGE_A_PATHNAME, PACKAGE_B_PATHNAME)
 
         etalon = {
-            PACKAGE_A_MODULE_A_PATHNAME: set([PACKAGE_B_MODULE_A_PATHNAME, PACKAGE_A_MODULE_B_PATHNAME]),
-        PACKAGE_B_MODULE_A_PATHNAME: set([PACKAGE_A_MODULE_B_PATHNAME])
+            module_meta(MAIN, PACKAGE_A_MODULE_A_PATHNAME):
+                set(
+                    [module_meta('.'.join([ROOT, PACKAGE_B]), PACKAGE_B_MODULE_INIT_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_B, "module_a"]), PACKAGE_B_MODULE_A_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_A]), PACKAGE_A_MODULE_INIT_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_A, 'module_b']), PACKAGE_A_MODULE_B_PATHNAME)]
+                ),
+            module_meta(MAIN, PACKAGE_B_MODULE_A_PATHNAME):
+                set(
+                [module_meta('.'.join([ROOT, PACKAGE_A]), PACKAGE_A_MODULE_INIT_PATHNAME),
+                 module_meta('.'.join([ROOT, PACKAGE_A, 'module_b']), PACKAGE_A_MODULE_B_PATHNAME)]
+            )
         }
+
+        self.assertDictEqual(result, etalon)
+
+    def test_dependency_from_init_module(self):
+        build_package_tree(
+            {
+                ROOT_PACKAGE: {
+                    INIT_FILE: '',
+                    PACKAGE_A: {
+                        INIT_FILE: """
+                                    import os
+                                    import sys
+                                    from root_package.package_b import module_a
+
+                                    def baz():
+                                        print 'baz'
+
+                                    if __name__ == '__main__':
+                                        module_a.foo()
+                        """,
+                        MODULE_A: """
+                                    import os
+                                    import sys
+                                    from root_package.package_c import module_a as c_module_a
+                                    if __name__ == '__main__':
+                                        c_module_a.foo()
+                                        """
+                    },
+                    PACKAGE_B: {
+                        INIT_FILE: 'import sys',
+                        MODULE_A: """
+                                    import socket
+                                    def foo():
+                                        print 'foo'
+                                        """,
+                        MODULE_B: """
+                                    from root_package.package_a import baz
+                                    if __name__ == '__main__':
+                                        baz()
+
+                        """
+                    },
+                    PACKAGE_C: {
+                        INIT_FILE: '',
+                        MODULE_A: """
+                                    def foo():
+                                        print 'foo'
+                        """
+                    }
+                }
+            }
+        )
+
+        result = main(PACKAGE_A_PATHNAME, PACKAGE_B_PATHNAME)
+
+
+        etalon = {
+            module_meta(MAIN, PACKAGE_A_MODULE_INIT_PATHNAME):
+                set(
+                    [module_meta('.'.join([ROOT, PACKAGE_B]), PACKAGE_B_MODULE_INIT_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_B, "module_a"]), PACKAGE_B_MODULE_A_PATHNAME)]
+                ),
+            module_meta(MAIN, PACKAGE_B_MODULE_B_PATHNAME):
+                set(
+                    [module_meta('.'.join([ROOT, PACKAGE_A]), PACKAGE_A_MODULE_INIT_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_B]), PACKAGE_B_MODULE_INIT_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_B, 'module_a']), PACKAGE_B_MODULE_A_PATHNAME)]
+                )
+        }
+
+        self.assertDictEqual(result, etalon)
+
+    def test_import_inside_function(self):
+        build_package_tree(
+            {
+                ROOT_PACKAGE: {
+                    INIT_FILE: '',
+                    PACKAGE_A: {
+                        INIT_FILE: """
+                                    import os
+                                    import sys
+
+                                    def baz():
+                                        from root_package.package_b import module_a
+                                        print 'baz'
+
+                                    if __name__ == '__main__':
+                                        module_a.foo()
+                        """,
+                        MODULE_A: """
+                                    import os
+                                    import sys
+                                  """
+                    },
+                    PACKAGE_B: {
+                        INIT_FILE: 'import sys',
+                        MODULE_A: """
+                                    import socket
+                                    def foo():
+                                        print 'foo'
+                                        """,
+                        MODULE_B: """
+                                    from root_package.package_a import baz
+                                    if __name__ == '__main__':
+                                        baz()
+
+                        """
+                    },
+                }
+            }
+        )
+
+        result = main(PACKAGE_A_PATHNAME, PACKAGE_B_PATHNAME)
+
+
+        etalon = {
+            module_meta(MAIN, PACKAGE_A_MODULE_INIT_PATHNAME):
+                set(
+                    [module_meta('.'.join([ROOT, PACKAGE_B]), PACKAGE_B_MODULE_INIT_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_B, "module_a"]), PACKAGE_B_MODULE_A_PATHNAME)]
+                ),
+            module_meta(MAIN, PACKAGE_B_MODULE_B_PATHNAME):
+                set(
+                    [module_meta('.'.join([ROOT, PACKAGE_A]), PACKAGE_A_MODULE_INIT_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_B]), PACKAGE_B_MODULE_INIT_PATHNAME),
+                     module_meta('.'.join([ROOT, PACKAGE_B, 'module_a']), PACKAGE_B_MODULE_A_PATHNAME)]
+                )
+        }
+
         self.assertDictEqual(result, etalon)

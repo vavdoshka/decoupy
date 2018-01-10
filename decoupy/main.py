@@ -7,10 +7,14 @@ from collections import namedtuple
 module_meta = namedtuple('module', 'package pathname'.split())
 
 
+def find_common_base_path(path1, path2):
+    return os.path.dirname(os.path.commonprefix([path1, path2]))
+
+
 def main(a_pathname, b_pathname):
     modules_a = findall(a_pathname)
     modules_b = findall(b_pathname)
-    sys_path = [os.path.dirname(os.path.dirname(os.path.commonprefix([a_pathname, b_pathname])))] + sys.path
+    sys_path = [os.path.dirname(find_common_base_path(a_pathname, b_pathname))] + sys.path
     out = {}
     traverse_dependencies(modules_a, a_pathname, b_pathname, out, sys_path)
     traverse_dependencies(modules_b, a_pathname, b_pathname, out, sys_path)
